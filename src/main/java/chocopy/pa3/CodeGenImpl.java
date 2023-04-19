@@ -1,9 +1,11 @@
 package chocopy.pa3;
 
+import java.lang.reflect.Parameter;
 import java.util.List;
 
 import chocopy.common.analysis.SymbolTable;
 import chocopy.common.analysis.AbstractNodeAnalyzer;
+import chocopy.common.astnodes.*;
 import chocopy.common.astnodes.Stmt;
 import chocopy.common.astnodes.ReturnStmt;
 import chocopy.common.codegen.CodeGenBase;
@@ -88,7 +90,11 @@ public class CodeGenImpl extends CodeGenBase {
         backend.emitMV(A0, ZERO, "Returning None implicitly");
         backend.emitLocalLabel(stmtAnalyzer.epilogue, "Epilogue");
 
-        // FIXME: {... reset fp etc. ...}
+        // FIXME: {... reset fp etc. ...} CHECK THAT THIS WORKS!
+        backend.emitADDI(SP, FP, 0, "Reset SP to FP.");
+        backend.emitLW(RA, FP, 0, "Restore return address from stack frame.");
+        backend.emitLW(FP, FP, -backend.getWordSize(),
+                "Restore previous frame pointer from stack frame.");
         backend.emitJR(RA, "Return to caller");
     }
 
@@ -147,6 +153,151 @@ public class CodeGenImpl extends CodeGenBase {
             epilogue = generateLocalLabel();
         }
 
+        //Override everything in AbstractNodeAnalyzer in order
+
+        @Override
+        public Void analyze(AssignStmt stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(BinaryExpr stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(BooleanLiteral stmt) {
+            // Push the boolean value onto the stack
+            if (stmt.value) {
+                backend.emitLI(A0, 1, "Pushing \"true\" literal onto stack");
+            } else {
+                backend.emitLI(A0, 0, "Pushing \"false\" literal onto stack");
+            }
+            //Box the boolean
+            backend.emitJAL(makebool, "Boxing boolean");
+            return null;
+        }
+
+        @Override
+        public Void analyze(CallExpr stmt) {
+            //Push fp
+            backend.emitADDI(SP, SP, -4, "Pushing fp part 1: decrementing sp");
+            backend.emitSW(FP, SP, 0, "Pushing fp part 2: saving fp");
+
+            //Body
+            for (int i = stmt.args.size() - 1; i >= 0; i--) {
+                //Cgen the args...
+                stmt.args.get(i).dispatch(this);
+                //...and push them onto the stack
+                backend.emitADDI(SP, SP, -4, "Decrementing sp");
+                backend.emitSW(A0, SP, 0, "Pushing arg onto stack");
+            }
+
+            //Find the funcInfo object associated with stmt
+            FuncInfo f = (FuncInfo) sym.get(stmt.function.name);
+
+            //Jump to the function
+            backend.emitJAL(f.getCodeLabel(), "Jumping to function " + stmt.function.name);
+
+            //Pop the args off the stack
+            //backend.emitADDI(SP, SP, 4 * stmt.args.size(), "Popping args off stack");
+            return null;
+        }
+
+        @Override
+        public Void analyze(ClassDef stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(ClassType stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(CompilerError stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(Errors stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(ExprStmt stmt) {
+            stmt.expr.dispatch(this);
+            //Four cases:
+            return null;
+        }
+
+        @Override
+        public Void analyze(ForStmt stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(FuncDef stmt) {
+            //FIXME
+
+            return null;
+        }
+
+        @Override
+        public Void analyze(GlobalDecl stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(Identifier stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(IfExpr stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(IfStmt stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(IndexExpr stmt) {
+            //FIXME
+            return null;
+        }
+
+        @Override
+        public Void analyze(IntegerLiteral stmt) {
+            // Push the integer value onto the stack
+            backend.emitLI(A0, stmt.value, "Pushing" + stmt.value + "literal onto stack");
+
+            //Box the integer
+            backend.emitJAL(makeint, "Boxing integer");
+            return null;
+        }
+
+        @Override
+        public Void analyze(WhileStmt stmt) {
+            //FIXME
+            return null;
+        }
+
+
+
         // FIXME: Example of statement.
         @Override
         public Void analyze(ReturnStmt stmt) {
@@ -154,7 +305,13 @@ public class CodeGenImpl extends CodeGenBase {
             // this is wrong, and you'll have to fix it.
             // This is here just to demonstrate how to emit a
             // RISC-V instruction.
-            backend.emitMV(ZERO, ZERO, "No-op");
+            //backend.emitMV(ZERO, ZERO, "No-op");
+            //return null;
+
+            //Evaluate the expression and store the result in A0
+            stmt.value.dispatch(this);
+            //Jump to the end of the function and return
+            backend.emitJ(epilogue, "Jumping to epilogue");
             return null;
         }
 
@@ -189,6 +346,8 @@ public class CodeGenImpl extends CodeGenBase {
         emitErrorFunc(errorNone, "Operation on None");
         emitErrorFunc(errorDiv, "Division by zero");
         emitErrorFunc(errorOob, "Index out of bounds");
+        emitBoxBoolean();
+        emitBoxInteger();
     }
 
     /** Emit an error routine labeled ERRLABEL that aborts with message MSG. */
@@ -200,5 +359,33 @@ public class CodeGenImpl extends CodeGenBase {
         backend.emitADDI(A1, A1, getAttrOffset(strClass, "__str__"),
                          "Load address of attribute __str__");
         backend.emitJ(abortLabel, "Abort");
+    }
+
+    final Label makebool = new Label("makebool");
+
+    /** Emit a routine to box a boolean. */
+    private void emitBoxBoolean() {
+        backend.emitGlobalLabel(makebool);
+        backend.emitSLLI(A0, A0, 4, "Shift boolean value into place");
+        backend.emitLA(T0, constants.getBoolConstant(false), "Load address of False");
+        backend.emitADD(A0, A0, T0, "Add False address to boolean value");
+        backend.emitJR(RA, "Return from makebool");
+    }
+
+    final Label makeint = new Label("makeint");
+
+    /** Emit a routine to box an integer. */
+    private void emitBoxInteger() {
+        backend.emitGlobalLabel(makeint);
+        backend.emitADDI(SP, SP, -8, "Decrementing sp");
+        backend.emitSW(RA, SP, 4, "Storing return address");
+        backend.emitSW(A0, SP, 0, "Storing argument");
+        backend.emitLA(A0, intClass.getPrototypeLabel(), "Load address of int prototype");
+        backend.emitJAL(objectAllocLabel, "Allocate int object");
+        backend.emitLW(T0, SP, 0, "Loading argument");
+        backend.emitSW(T0, A0, "@.__int__", "Storing argument in int object");
+        backend.emitLW(RA, SP, 4, "Loading return address");
+        backend.emitADDI(SP, SP, 8, "Incrementing sp");
+        backend.emitJR(RA, "Return from makeint");
     }
 }
