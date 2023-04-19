@@ -8,11 +8,7 @@ import chocopy.common.analysis.AbstractNodeAnalyzer;
 import chocopy.common.astnodes.*;
 import chocopy.common.astnodes.Stmt;
 import chocopy.common.astnodes.ReturnStmt;
-import chocopy.common.codegen.CodeGenBase;
-import chocopy.common.codegen.FuncInfo;
-import chocopy.common.codegen.Label;
-import chocopy.common.codegen.RiscVBackend;
-import chocopy.common.codegen.SymbolInfo;
+import chocopy.common.codegen.*;
 
 import static chocopy.common.codegen.RiscVBackend.Register.*;
 
@@ -98,7 +94,7 @@ public class CodeGenImpl extends CodeGenBase {
         backend.emitJR(RA, "Return to caller");
     }
 
-    /** An analyzer that encapsulates code generation for statments. */
+    /** An analyzer that encapsulates code generation for statements. */
     private class StmtAnalyzer extends AbstractNodeAnalyzer<Void> {
         /*
          * The symbol table has all the info you need to determine
@@ -195,13 +191,13 @@ public class CodeGenImpl extends CodeGenBase {
                 backend.emitSW(A0, SP, 0, "Pushing arg onto stack");
             }
 
-            //Find the funcInfo object associated with stmt
+            //FIXME: Find the funcInfo object associated with stmt (Is this correct? Should I be checking for if func is null first?)
             FuncInfo f = (FuncInfo) sym.get(stmt.function.name);
 
             //Jump to the function
             backend.emitJAL(f.getCodeLabel(), "Jumping to function " + stmt.function.name);
 
-            //Pop the args off the stack
+            //FIXME: Do I need to pop the args off the stack?
             //backend.emitADDI(SP, SP, 4 * stmt.args.size(), "Popping args off stack");
             return null;
         }
@@ -233,7 +229,6 @@ public class CodeGenImpl extends CodeGenBase {
         @Override
         public Void analyze(ExprStmt stmt) {
             stmt.expr.dispatch(this);
-            //Four cases:
             return null;
         }
 
@@ -246,19 +241,40 @@ public class CodeGenImpl extends CodeGenBase {
         @Override
         public Void analyze(FuncDef stmt) {
             //FIXME
+            Label f = new Label(stmt.name.name);
+            backend.emitGlobalLabel(f); //FIXME: Is it supposed to be global? Does it matter?
+            backend.emitMV(FP, SP, "Setting up frame pointer");
+            backend.emitADDI(SP, SP, -4, "Decrementing sp");
+            backend.emitSW(RA, SP, 0, "Pushing return address onto stack");
 
+            StmtAnalyzer sa = new StmtAnalyzer(funcInfo);
+            //Generate all the declarations in the body
+            for (Declaration d : stmt.declarations) {
+                d.dispatch(sa);
+            }
+            //Generate all the statements in the body
+            for (Stmt s : stmt.statements) {
+                s.dispatch(sa);
+            }
+            backend.emitLW(RA, SP, 0, "Popping return address off stack");
+            backend.emitADDI(SP, SP, 4 * stmt.statements.size() + 4, "Restoring frame pointer");
+            backend.emitLW(FP, SP, 0, "Popping fp off stack");
+            backend.emitJR(RA, "Jumping to return address");
             return null;
         }
 
         @Override
         public Void analyze(GlobalDecl stmt) {
             //FIXME
+            stmt.dispatch(this);
+
             return null;
         }
 
         @Override
         public Void analyze(Identifier stmt) {
             //FIXME
+
             return null;
         }
 
@@ -283,7 +299,7 @@ public class CodeGenImpl extends CodeGenBase {
         @Override
         public Void analyze(IntegerLiteral stmt) {
             // Push the integer value onto the stack
-            backend.emitLI(A0, stmt.value, "Pushing" + stmt.value + "literal onto stack");
+            backend.emitLI(A0, stmt.value, "Pushing " + stmt.value + "literal onto stack");
 
             //Box the integer
             backend.emitJAL(makeint, "Boxing integer");
@@ -291,8 +307,10 @@ public class CodeGenImpl extends CodeGenBase {
         }
 
         @Override
-        public Void analyze(WhileStmt stmt) {
+        public Void analyze(NoneLiteral stmt) {
             //FIXME
+            // Push the None literal onto the stack
+            backend.emitLI(A0, 0, "Pushing None literal onto stack");
             return null;
         }
 
@@ -308,10 +326,46 @@ public class CodeGenImpl extends CodeGenBase {
             //backend.emitMV(ZERO, ZERO, "No-op");
             //return null;
 
-            //Evaluate the expression and store the result in A0
+            //Evaluate the expression
             stmt.value.dispatch(this);
-            //Jump to the end of the function and return
-            backend.emitJ(epilogue, "Jumping to epilogue");
+            //And push it onto the stack
+            backend.emitADDI(SP, SP, -4, "Decrementing sp");
+            backend.emitSW(A0, SP, 0, "Pushing return value onto stack");
+            //Jump to return address
+            backend.emitJR(RA, "Jumping to return address");
+            return null;
+        }
+
+        @Override
+        public Void analyze(StringLiteral stmt) {
+            // Push the string value onto the stack
+            backend.emitLA(A0, constants.getStrConstant(stmt.value), "Loading \"" + stmt.value + "\" literal onto stack");
+            return null;
+        }
+
+        @Override
+        public Void analyze(TypedVar stmt) {
+
+            return null;
+        }
+
+        @Override
+        public Void analyze(VarDef stmt) {
+            //FIXME
+            if (funcInfo == null) {
+                //Global variable
+                //sym.put(stmt.var.identifier.name, new GlobalVarInfo(stmt.var.identifier.name, stmt.var.type, stmt.value));
+            } else {
+                //Local variable
+                //sym.put(stmt.var.identifier.name, );
+            }
+
+            return null;
+        }
+
+        @Override
+        public Void analyze(WhileStmt stmt) {
+            //FIXME
             return null;
         }
 
