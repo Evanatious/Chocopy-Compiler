@@ -76,22 +76,22 @@ public class CodeGenImpl extends CodeGenBase {
      * `bar`'s code for `bar`.
      */
     protected void emitUserDefinedFunction(FuncInfo funcInfo) {
+        //FIXME
         backend.emitGlobalLabel(funcInfo.getCodeLabel());
+        backend.emitMV(FP, SP, "Setting up frame pointer");
+        backend.emitADDI(SP, SP, -4, "Decrementing sp");
+        backend.emitSW(RA, SP, 0, "Pushing return address onto stack");
+
         StmtAnalyzer stmtAnalyzer = new StmtAnalyzer(funcInfo);
 
         for (Stmt stmt : funcInfo.getStatements()) {
             stmt.dispatch(stmtAnalyzer);
         }
 
-        backend.emitMV(A0, ZERO, "Returning None implicitly");
-        backend.emitLocalLabel(stmtAnalyzer.epilogue, "Epilogue");
-
-        // FIXME: {... reset fp etc. ...} CHECK THAT THIS WORKS!
-        backend.emitADDI(SP, FP, 0, "Reset SP to FP.");
-        backend.emitLW(RA, FP, 0, "Restore return address from stack frame.");
-        backend.emitLW(FP, FP, -backend.getWordSize(),
-                "Restore previous frame pointer from stack frame.");
-        backend.emitJR(RA, "Return to caller");
+        backend.emitLW(RA, SP, 0, "Popping return address off stack");
+        backend.emitADDI(SP, SP, 4 * funcInfo.getParams().size() + 4, "Restoring frame pointer");
+        backend.emitLW(FP, SP, 0, "Popping fp off stack");
+        backend.emitJR(RA, "Jumping to return address");
     }
 
     /** An analyzer that encapsulates code generation for statements. */
@@ -191,8 +191,17 @@ public class CodeGenImpl extends CodeGenBase {
                 backend.emitSW(A0, SP, 0, "Pushing arg onto stack");
             }
 
+            FuncInfo f;
+
             //FIXME: Find the funcInfo object associated with stmt (Is this correct? Should I be checking for if func is null first?)
-            FuncInfo f = (FuncInfo) sym.get(stmt.function.name);
+            if (funcInfo == null) {
+                f = (FuncInfo) globalSymbols.get(stmt.function.name);
+            } else {
+                f = (FuncInfo) sym.get(stmt.function.name);
+            }
+
+            //System.out.println("Function name: " + stmt.function.name);
+            //System.out.println("Function info: " + f);
 
             //Jump to the function
             backend.emitJAL(f.getCodeLabel(), "Jumping to function " + stmt.function.name);
@@ -243,11 +252,14 @@ public class CodeGenImpl extends CodeGenBase {
             //FIXME
             Label f = new Label(stmt.name.name);
             backend.emitGlobalLabel(f); //FIXME: Is it supposed to be global? Does it matter?
+            System.out.println("Here inside analyze funcdef");
             backend.emitMV(FP, SP, "Setting up frame pointer");
+            System.out.println("We are not skipping anything!");
             backend.emitADDI(SP, SP, -4, "Decrementing sp");
             backend.emitSW(RA, SP, 0, "Pushing return address onto stack");
 
             StmtAnalyzer sa = new StmtAnalyzer(funcInfo);
+
             //Generate all the declarations in the body
             for (Declaration d : stmt.declarations) {
                 d.dispatch(sa);
@@ -256,8 +268,9 @@ public class CodeGenImpl extends CodeGenBase {
             for (Stmt s : stmt.statements) {
                 s.dispatch(sa);
             }
+
             backend.emitLW(RA, SP, 0, "Popping return address off stack");
-            backend.emitADDI(SP, SP, 4 * stmt.statements.size() + 4, "Restoring frame pointer");
+            backend.emitADDI(SP, SP, 4 * stmt.params.size() + 4, "Restoring frame pointer");
             backend.emitLW(FP, SP, 0, "Popping fp off stack");
             backend.emitJR(RA, "Jumping to return address");
             return null;
@@ -274,7 +287,35 @@ public class CodeGenImpl extends CodeGenBase {
         @Override
         public Void analyze(Identifier stmt) {
             //FIXME
-
+            SymbolInfo temp = sym.get(stmt.name);
+            if (temp instanceof GlobalVarInfo) {
+                GlobalVarInfo v = (GlobalVarInfo) temp;
+                v.getInitialValue().dispatch(this);
+                /*
+                //System.out.println("Variable name: " + v.getVarName() + "\nVariable type: " + v.getVarType().className());
+                backend.emitLW(A0, v.getLabel(), "Loading global variable " + stmt.name);
+                if (v.getVarType().className().equals("int")) {
+                    backend.emitJAL(makeint, "Boxing int");
+                } else if (v.getVarType().className().equals("bool")) {
+                    backend.emitJAL(makebool, "Boxing boolean");
+                }*/
+            } else if (temp instanceof FuncInfo) {
+                FuncInfo f = (FuncInfo) temp;
+                backend.emitLA(A0, f.getCodeLabel(), "Loading function " + stmt.name);
+            } else if (temp instanceof ClassInfo) {
+                //FIXME
+                //ClassInfo c = (ClassInfo) temp;
+                //backend.emitLA(A0, c.getCodeLabel(), "Loading class " + stmt.name);
+            } else if (temp instanceof StackVarInfo) {
+                //FIXME
+                StackVarInfo v = (StackVarInfo) temp;
+                //System.out.println("Variable name: " + v.getVarName() + "\nVariable type: " + v.getVarType().className()
+                //+ "\nVariable initial value: " + v.getInitialValue());
+                StmtAnalyzer sa = new StmtAnalyzer(v.getFuncInfo());
+                v.getInitialValue().dispatch(sa);
+            } else {
+                //FIXME
+            }
             return null;
         }
 
@@ -314,6 +355,21 @@ public class CodeGenImpl extends CodeGenBase {
             return null;
         }
 
+        @Override
+        public Void analyze(Program stmt) {
+            System.out.println("Here inside analyze program");
+            //FIXME
+            //Generate all declarations
+            for (Declaration d : stmt.declarations) {
+                d.dispatch(this);
+            }
+            //Generate all statements
+            for (Stmt s : stmt.statements) {
+                s.dispatch(this);
+            }
+            return null;
+        }
+
 
 
         // FIXME: Example of statement.
@@ -326,13 +382,8 @@ public class CodeGenImpl extends CodeGenBase {
             //backend.emitMV(ZERO, ZERO, "No-op");
             //return null;
 
-            //Evaluate the expression
+            //Evaluate the expression?
             stmt.value.dispatch(this);
-            //And push it onto the stack
-            backend.emitADDI(SP, SP, -4, "Decrementing sp");
-            backend.emitSW(A0, SP, 0, "Pushing return value onto stack");
-            //Jump to return address
-            backend.emitJR(RA, "Jumping to return address");
             return null;
         }
 
@@ -352,13 +403,6 @@ public class CodeGenImpl extends CodeGenBase {
         @Override
         public Void analyze(VarDef stmt) {
             //FIXME
-            if (funcInfo == null) {
-                //Global variable
-                //sym.put(stmt.var.identifier.name, new GlobalVarInfo(stmt.var.identifier.name, stmt.var.type, stmt.value));
-            } else {
-                //Local variable
-                //sym.put(stmt.var.identifier.name, );
-            }
 
             return null;
         }
