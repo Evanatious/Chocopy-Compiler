@@ -206,8 +206,8 @@ public class CodeGenImpl extends CodeGenBase {
             //Jump to the function
             backend.emitJAL(f.getCodeLabel(), "Jumping to function " + stmt.function.name);
 
-            //FIXME: Do I need to pop the args off the stack?
-            //backend.emitADDI(SP, SP, 4 * stmt.args.size(), "Popping args off stack");
+            //Restoring frame pointer
+            backend.emitADDI(SP, SP, 4 * stmt.args.size() + 4, "Restoring frame pointer");
             return null;
         }
 
@@ -252,9 +252,7 @@ public class CodeGenImpl extends CodeGenBase {
             //FIXME
             Label f = new Label(stmt.name.name);
             backend.emitGlobalLabel(f); //FIXME: Is it supposed to be global? Does it matter?
-            System.out.println("Here inside analyze funcdef");
             backend.emitMV(FP, SP, "Setting up frame pointer");
-            System.out.println("We are not skipping anything!");
             backend.emitADDI(SP, SP, -4, "Decrementing sp");
             backend.emitSW(RA, SP, 0, "Pushing return address onto stack");
 
