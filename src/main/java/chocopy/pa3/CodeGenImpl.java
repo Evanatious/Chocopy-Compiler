@@ -84,6 +84,8 @@ public class CodeGenImpl extends CodeGenBase {
 
         StmtAnalyzer stmtAnalyzer = new StmtAnalyzer(funcInfo);
 
+        //funcInfo.emitBody();
+
         for (Stmt stmt : funcInfo.getStatements()) {
             stmt.dispatch(stmtAnalyzer);
         }
@@ -154,6 +156,7 @@ public class CodeGenImpl extends CodeGenBase {
         @Override
         public Void analyze(AssignStmt stmt) {
             //FIXME
+
             return null;
         }
 
@@ -183,8 +186,10 @@ public class CodeGenImpl extends CodeGenBase {
             backend.emitSW(FP, SP, 0, "Pushing fp part 2: saving fp");
 
             //Body
+            //Debugging
             for (int i = stmt.args.size() - 1; i >= 0; i--) {
                 //Cgen the args...
+                System.out.println("Arg " + i + ":" + stmt.args.get(i));
                 stmt.args.get(i).dispatch(this);
                 //...and push them onto the stack
                 backend.emitADDI(SP, SP, -4, "Decrementing sp");
@@ -195,13 +200,15 @@ public class CodeGenImpl extends CodeGenBase {
 
             //FIXME: Find the funcInfo object associated with stmt (Is this correct? Should I be checking for if func is null first?)
             if (funcInfo == null) {
+                System.out.println("funcInfo is null");
                 f = (FuncInfo) globalSymbols.get(stmt.function.name);
             } else {
+                System.out.println("funcInfo is not null: " + funcInfo.getFuncName());
                 f = (FuncInfo) sym.get(stmt.function.name);
             }
 
-            //System.out.println("Function name: " + stmt.function.name);
-            //System.out.println("Function info: " + f);
+            System.out.println("Function name: " + stmt.function.name);
+            System.out.println("Function info: " + f);
 
             //Jump to the function
             backend.emitJAL(f.getCodeLabel(), "Jumping to function " + stmt.function.name);
@@ -249,6 +256,7 @@ public class CodeGenImpl extends CodeGenBase {
 
         @Override
         public Void analyze(FuncDef stmt) {
+            System.out.println("Here in funcdef");
             //FIXME
             Label f = new Label(stmt.name.name);
             backend.emitGlobalLabel(f); //FIXME: Is it supposed to be global? Does it matter?
@@ -286,6 +294,7 @@ public class CodeGenImpl extends CodeGenBase {
         public Void analyze(Identifier stmt) {
             //FIXME
             SymbolInfo temp = sym.get(stmt.name);
+            System.out.println("Identifier: " + stmt.name + " SymbolInfo: " + temp);
             if (temp instanceof GlobalVarInfo) {
                 GlobalVarInfo v = (GlobalVarInfo) temp;
                 v.getInitialValue().dispatch(this);
@@ -307,12 +316,22 @@ public class CodeGenImpl extends CodeGenBase {
             } else if (temp instanceof StackVarInfo) {
                 //FIXME
                 StackVarInfo v = (StackVarInfo) temp;
-                //System.out.println("Variable name: " + v.getVarName() + "\nVariable type: " + v.getVarType().className()
-                //+ "\nVariable initial value: " + v.getInitialValue());
-                StmtAnalyzer sa = new StmtAnalyzer(v.getFuncInfo());
-                v.getInitialValue().dispatch(sa);
+                FuncInfo enclosingFunc = v.getFuncInfo();
+                int index = enclosingFunc.getVarIndex(v.getVarName());
+
+                System.out.println("Current function: " + funcInfo.getFuncName());
+                System.out.println("Enclosing function: " + enclosingFunc.getFuncName());
+                System.out.println("Variable name: " + v.getVarName() + "\nVariable type: " + v.getVarType().className()
+                        + "\nVariable initial value: " + v.getInitialValue());
+                backend.emitLW(A0, SP, 8 + index * 4, "Loading the " + index + "th argument");
+                //FIXME: Magic number 8 might be wrong? Should only be used for argument variables, not instance variables.
+                //Also, make sure to index properly
             } else {
                 //FIXME
+                AttrInfo v = (AttrInfo) temp;
+                //System.out.println("Variable name: " + v.getVarName() + "\nVariable type: " + v.getVarType().className()
+                //+ "\nVariable initial value: " + v.getInitialValue());
+                v.getInitialValue().dispatch(this);
             }
             return null;
         }
