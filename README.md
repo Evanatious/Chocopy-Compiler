@@ -72,24 +72,3 @@ for the specification of the ChocoPy language.
 Refer to the [ChocoPy Implementation Guide][] on the CS164 web site
 for the conventions used by the reference compiler and the
 starter code.
-
-## Receiving updates to this repository
-
-Add the `upstream` repository remotes (you only need to do this once in your local clone):
-
-```
-git remote add upstream https://github.com/cs164spring2023/pa3-chocopy-code-generation.git
-```
-
-To sync with updates upstream:
-```
-git pull upstream master
-```
-
-## Submission writeup
-
-Team member 1: 
-
-Team member 2: 
-
-(Students should edit this section with their write-up)
