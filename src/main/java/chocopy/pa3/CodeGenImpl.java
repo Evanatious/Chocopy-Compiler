@@ -76,9 +76,9 @@ public class CodeGenImpl extends CodeGenBase {
      * `bar`'s code for `bar`.
      */
     protected void emitUserDefinedFunction(FuncInfo funcInfo) {
-        //FIXME
+        //FIXME: Basically code generation for function definition? I think?
         backend.emitGlobalLabel(funcInfo.getCodeLabel());
-        backend.emitMV(FP, SP, "Setting up frame pointer");
+        backend.emitMV(FP, SP, "Setting up frame pointer to point to where the stack pointer is currently (start of new frame)");
         backend.emitADDI(SP, SP, -4, "Decrementing sp");
         backend.emitSW(RA, SP, 0, "Pushing return address onto stack");
 
@@ -90,9 +90,9 @@ public class CodeGenImpl extends CodeGenBase {
             stmt.dispatch(stmtAnalyzer);
         }
 
-        backend.emitLW(RA, SP, 0, "Popping return address off stack");
-        backend.emitADDI(SP, SP, 4 * funcInfo.getParams().size() + 4, "Restoring frame pointer");
-        backend.emitLW(FP, SP, 0, "Popping fp off stack");
+        backend.emitLW(RA, SP, 0, "Popping return address off stack"); //FIXME: Incorporate instance variables
+        backend.emitADDI(SP, SP, 4 * funcInfo.getParams().size() + 8, "Restoring frame pointer to where it was before the call: 8 + 4 * number of args for the arguments");
+        backend.emitLW(FP, SP, 0, "Restoring frame pointer");
         backend.emitJR(RA, "Jumping to return address");
     }
 
@@ -182,39 +182,34 @@ public class CodeGenImpl extends CodeGenBase {
         @Override
         public Void analyze(CallExpr stmt) {
             //Push fp
-            backend.emitADDI(SP, SP, -4, "Pushing fp part 1: decrementing sp");
-            backend.emitSW(FP, SP, 0, "Pushing fp part 2: saving fp");
+            backend.emitADDI(SP, SP, -4, "Pushing old fp part 1: decrementing sp");
+            backend.emitSW(FP, SP, 0, "Pushing old fp part 2: saving old fp");
 
             //Body
             //Debugging
             for (int i = stmt.args.size() - 1; i >= 0; i--) {
                 //Cgen the args...
-                System.out.println("Arg " + i + ":" + stmt.args.get(i));
+                //System.out.println("Arg " + i + ":" + stmt.args.get(i));
                 stmt.args.get(i).dispatch(this);
                 //...and push them onto the stack
                 backend.emitADDI(SP, SP, -4, "Decrementing sp");
-                backend.emitSW(A0, SP, 0, "Pushing arg onto stack");
+                backend.emitSW(A0, SP, 0, "Pushing arg0 onto stack");
             }
 
             FuncInfo f;
 
             //FIXME: Find the funcInfo object associated with stmt (Is this correct? Should I be checking for if func is null first?)
             if (funcInfo == null) {
-                System.out.println("funcInfo is null");
                 f = (FuncInfo) globalSymbols.get(stmt.function.name);
             } else {
-                System.out.println("funcInfo is not null: " + funcInfo.getFuncName());
                 f = (FuncInfo) sym.get(stmt.function.name);
             }
 
-            System.out.println("Function name: " + stmt.function.name);
-            System.out.println("Function info: " + f);
+            //System.out.println("Function name: " + stmt.function.name);
+            //System.out.println("Function info: " + f);
 
             //Jump to the function
             backend.emitJAL(f.getCodeLabel(), "Jumping to function " + stmt.function.name);
-
-            //Restoring frame pointer
-            backend.emitADDI(SP, SP, 4 * stmt.args.size() + 4, "Restoring frame pointer");
             return null;
         }
 
@@ -298,14 +293,6 @@ public class CodeGenImpl extends CodeGenBase {
             if (temp instanceof GlobalVarInfo) {
                 GlobalVarInfo v = (GlobalVarInfo) temp;
                 v.getInitialValue().dispatch(this);
-                /*
-                //System.out.println("Variable name: " + v.getVarName() + "\nVariable type: " + v.getVarType().className());
-                backend.emitLW(A0, v.getLabel(), "Loading global variable " + stmt.name);
-                if (v.getVarType().className().equals("int")) {
-                    backend.emitJAL(makeint, "Boxing int");
-                } else if (v.getVarType().className().equals("bool")) {
-                    backend.emitJAL(makebool, "Boxing boolean");
-                }*/
             } else if (temp instanceof FuncInfo) {
                 FuncInfo f = (FuncInfo) temp;
                 backend.emitLA(A0, f.getCodeLabel(), "Loading function " + stmt.name);
@@ -323,7 +310,13 @@ public class CodeGenImpl extends CodeGenBase {
                 System.out.println("Enclosing function: " + enclosingFunc.getFuncName());
                 System.out.println("Variable name: " + v.getVarName() + "\nVariable type: " + v.getVarType().className()
                         + "\nVariable initial value: " + v.getInitialValue());
-                backend.emitLW(A0, SP, 8 + index * 4, "Loading the " + index + "th argument");
+                if (index > enclosingFunc.getParams().size() - 1) {
+                    //It's an instance variable
+                    backend.emitLW(A0, FP, index * 4, "Loading the " + index + "th instance variable");
+                } else {
+                    //It's an argument
+                    backend.emitLW(A0, SP, 8 + (index + enclosingFunc.getLocals().size()) * 4, "Loading the " + index + "th argument");
+                }
                 //FIXME: Magic number 8 might be wrong? Should only be used for argument variables, not instance variables.
                 //Also, make sure to index properly
             } else {
